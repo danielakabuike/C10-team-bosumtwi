@@ -1,4 +1,4 @@
-# C10-Team-Bosumtwi — Agricultural Extension RAG Retrieval
+# C10-Team-Bosumtwi — Optimizing RAG Document Retrieval for Agronomic Advice
 
 ## Problem
 Smallholder farmers and extension workers in West Africa often describe crop problems in informal, local terms, while extension documents use technical language. This vocabulary mismatch causes existing retrieval tools to rank keyword-similar but irrelevant documents above truly useful guidance. Our system improves the evidence-retrieval layer for a RAG-based agronomic advisory tool, using a hybrid lexical + dense + cross-encoder ranking pipeline.
@@ -69,7 +69,7 @@ C10-team-bosumtwi/
 
 ## Appendix: Contributors
 - Team Bosumtwi — Cohort 10, TRI AI Saturdays
-- Project mentor: [to be added by team]
+- Project mentor: Samuel Taiwo,Oluwaseun Ajayi,Adnan Adetunji
 
 ## References
 - `docs/problem_statement.pdf`

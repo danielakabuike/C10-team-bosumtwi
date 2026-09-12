@@ -14,45 +14,66 @@ We use the competition corpus located in `data/`:
 
 The corpus blends synthetic CC0 documents with LLM-grounded rewrites of open-access CC-BY sources. No new data was collected from farmers; privacy is preserved by relying solely on the provided corpus.
 
-## Training / Inference Pipeline
-`scripts/retrieval_pipeline.py` implements:
 
-1. **Preprocessing** — lowercasing, stripping non-alphanumeric characters, stopword removal and Porter stemming to build a BM25 token index; title, crop, country and body are concatenated into a single document field.
-2. **BM25 lexical retrieval** (`rank_bm25`) over the cleaned/stemmed corpus.
-3. **Dense retrieval** with `all-MiniLM-L12-v2` (fallback to `L6-v2`) encoding both queries and documents; cosine similarity returns the top-100 candidates.
-4. **Reciprocal Rank Fusion (RRF)** to combine BM25 and dense rankings with tunable weights.
-5. **Cross-encoder reranking** with `cross-encoder/ms-marco-MiniLM-L-12-v2` (fallback to `L-6-v2`) on the fused top-100, producing the final top-5 documents per query.
-6. **Hyperparameter search** over `rrf_k`, `bm25_weight` and `dense_weight` on the training set to maximize nDCG@5.
+##  Training Pipeline
+When testing early baselines, standard BM25, basic vector search, and even off-the-shelf cross-encoders by themselves struggled to hit high scores on nDCG@5. Farmer queries often use casual or local wording, while extension documents use technical agronomy terms. 
 
-## Evaluation
-- Metric: **nDCG@5** on graded relevance labels.
-- We tune RRF parameters on `train_queries.csv` + `qrels_train.csv` and report the best training nDCG@5.
-- The final `submission.csv` is generated for `test_queries.csv` in the format required by the competition.
+To fix this, we set up a two-stage pipeline: wide candidate retrieval across diverse models, followed by a gradient-boosted ranker.
+
+[Farmer Query] │ ├── Standalone BM25 (Lemmatized) ──> Top 100 ├── BAAI/bge-small-en-v1.5 ──> Top 100 ├── intfloat/e5-base-v2 ──> Top 100 └── sentence-transformers/all-MiniLM-L6-v2 ──> Top 100 │ [Candidate Pooling] │ ├── Cross-Encoder Scoring (bge-reranker-large) ├── Metadata Matching (Crop Match, Word Overlap) └── Text Length Features │ [LightGBM LambdaMART Ranker] │ Top-5 Final Ranked Documents
+
+
+
+
+### Pipeline Breakdown
+1. **Lexical Retrieval (BM25)**: We wrote a pure NumPy/Python implementation of `BM25Okapi` ($k_1=1.2, b=0.5$) with NLTK lemmatization. It matches standard BM25 performance without needing external pip packages.
+2. **Dense Embeddings**: We used three complementary models to capture semantic meaning:
+   * `BAAI/bge-small-en-v1.5`
+   * `intfloat/e5-base-v2`
+   * `sentence-transformers/all-MiniLM-L6-v2`
+3. **Candidate Pool**: We pulled the top 100 candidates from each dense model and BM25, merging them into a candidate pool for each query.
+4. **Scoring & Features**: We ran candidates through `BAAI/bge-reranker-large` to get cross-attention scores. We then extracted 9 features per pair: the individual model scores, query/document lengths, token overlap, and a flag indicating whether the mentioned crop appears in the query.
+5. **LambdaMART Reranking**: We trained a `LGBMRanker` using the `lambdarank` objective tuned directly for nDCG@5 (`learning_rate=0.05`, `n_estimators=150`, `num_leaves=31`).
+6. **Safety Fallback**: If candidate pooling returns fewer than 5 docs for a query, the script automatically backfills the remaining slots with top BM25 matches to guarantee complete outputs.
+
+
+
+
+
+## 3. Evaluation
+We evaluated our ranking performance using Normalized Discounted Cumulative Gain at rank 5 (**nDCG@5**). 
+
+* **Overall Train nDCG@5**: **0.96879**
+
+Combining multiple dense encoders with BM25 gave the cross-encoder much better raw material to work with, and training LambdaMART directly on the ranking objective pulled the most relevant extension material into the top 5 slots.
+
+
+
+
 
 ## Reproduction
-1. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. Run the inference/tuning script:
-   ```bash
-   cd C10-team-bosumtwi
-   python scripts/retrieval_pipeline.py
-   ```
-   The script auto-detects `data/` in the repo, `agricultural-extension-rag-smart-retrieval-for-farmers/` locally, or Kaggle input paths.
-3. The generated `submission.csv` contains 1,000 rows (200 queries × 5 ranked documents).
+To run the full pipeline from scratch:
 
-Alternatively, open `notebooks/agricproject_V1.ipynb` in Jupyter/Kaggle and run all cells.
+``bash
+ 1. Install required packages
+pip install lightgbm sentence-transformers nltk torch pandas numpy
+
+ 2. Run the pipeline script
+python scripts/run_pipeline.py
+The script runs the feature extraction, fits the ranker, verifies all row constraints, and writes the predictions to submission.csv.
+
+Alternatively, open `notebooks/agricproject.ipynb` in Jupyter/Kaggle and run all cells.
 
 ## Repository Structure
+
 ```
 C10-team-bosumtwi/
 ├── README.md
 ├── requirements.txt
 ├── scripts/
-│   └── retrieval_pipeline.py
+│   └── run_pipeline.py
 ├── notebooks/
-│   └── agricproject_V1.ipynb
+│   └── agricproject.ipynb
 ├── data/
 │   ├── documents.csv
 │   ├── train_queries.csv
@@ -69,6 +90,7 @@ C10-team-bosumtwi/
 
 ## Appendix: Contributors
 - Team Bosumtwi — Cohort 10, TRI AI Saturdays
+- MEMBERS - AKABUIKE DANIEL (TEAM MEMEBER) , EMMANUEL DUROJAIYE
 - Project mentor: Samuel Taiwo,Oluwaseun Ajayi,Adnan Adetunji
 
 ## References
